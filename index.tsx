@@ -154,28 +154,28 @@ const INITIAL_DATA: WeeklyData = {
 const getApiKey = () => {
   let key = "";
   
-  // 1. Try Vite environment variables
+  // 1. Try Vite environment variables (Preferred for Netlify/Vite)
   try {
     // @ts-ignore
     if (import.meta && import.meta.env) {
       // @ts-ignore
-      if (import.meta.env.VITE_API_KEY) key = import.meta.env.VITE_API_KEY;
-      // @ts-ignore
       if (import.meta.env.VITE_GEMINI_API_KEY) key = import.meta.env.VITE_GEMINI_API_KEY;
       // @ts-ignore
-      if (import.meta.env.GEMINI_API_KEY) key = import.meta.env.GEMINI_API_KEY;
+      if (import.meta.env.VITE_API_KEY) key = import.meta.env.VITE_API_KEY;
+      // @ts-ignore
+      if (import.meta.env.GEMINI_API_KEY) key = import.meta.env.GEMINI_API_KEY; // Less likely to work
     }
   } catch (e) {}
 
   if (key) return key;
 
-  // 2. Try standard Process environment variables (Webpack/Node/Netlify default)
+  // 2. Try standard Process environment variables (Create React App / Webpack)
   try {
     if (typeof process !== 'undefined' && process.env) {
-      if (process.env.API_KEY) key = process.env.API_KEY;
-      if (process.env.GEMINI_API_KEY) key = process.env.GEMINI_API_KEY;
-      if (process.env.REACT_APP_API_KEY) key = process.env.REACT_APP_API_KEY;
       if (process.env.REACT_APP_GEMINI_API_KEY) key = process.env.REACT_APP_GEMINI_API_KEY;
+      if (process.env.REACT_APP_API_KEY) key = process.env.REACT_APP_API_KEY;
+      if (process.env.GEMINI_API_KEY) key = process.env.GEMINI_API_KEY;
+      if (process.env.API_KEY) key = process.env.API_KEY;
     }
   } catch (e) {}
 
@@ -524,7 +524,7 @@ const App = () => {
     try {
       const apiKey = getApiKey();
       if (!apiKey) {
-         throw new Error("API Key is missing. Please check your environment settings (API_KEY or GEMINI_API_KEY).");
+         throw new Error("API Key is missing. Check settings.");
       }
 
       const ai = new GoogleGenAI({ apiKey: apiKey });
@@ -611,18 +611,11 @@ const App = () => {
       console.error("Error generating plans:", error);
       let errorMessage = "生成出错，请重试";
       
-      if (error.message) {
-        if (error.message.includes("API Key")) {
-            errorMessage = "配置错误：未找到 API Key，请检查部署设置 (需配置 API_KEY 或 GEMINI_API_KEY)。";
-        } else if (error.message.includes("400")) {
-            errorMessage = "请求错误 (400)：请检查文件格式或大小是否符合要求。";
-        } else if (error.message.includes("413")) {
-            errorMessage = "文件过大 (413)：请上传更小的文件。";
-        } else if (error.message.includes("403")) {
-            errorMessage = "权限错误 (403)：API Key 无效或余额不足。";
-        } else {
-            errorMessage = `生成错误: ${error.message}`;
-        }
+      // Improved Error Messaging
+      if (error.message && error.message.includes("API Key")) {
+         errorMessage = `配置错误：未找到 API Key。如果您部署在 Netlify，请确保环境变量名为 'VITE_GEMINI_API_KEY' 或 'REACT_APP_GEMINI_API_KEY' (当前代码无法读取普通的 'GEMINI_API_KEY')。`;
+      } else if (error.message) {
+         errorMessage = error.message;
       }
       
       setUploadError(errorMessage);
