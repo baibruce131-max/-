@@ -150,6 +150,38 @@ const INITIAL_DATA: WeeklyData = {
 
 // --- Helpers ---
 
+// Robust API Key Retrieval
+const getApiKey = () => {
+  let key = "";
+  
+  // 1. Try Vite environment variables
+  try {
+    // @ts-ignore
+    if (import.meta && import.meta.env) {
+      // @ts-ignore
+      if (import.meta.env.VITE_API_KEY) key = import.meta.env.VITE_API_KEY;
+      // @ts-ignore
+      if (import.meta.env.VITE_GEMINI_API_KEY) key = import.meta.env.VITE_GEMINI_API_KEY;
+      // @ts-ignore
+      if (import.meta.env.GEMINI_API_KEY) key = import.meta.env.GEMINI_API_KEY;
+    }
+  } catch (e) {}
+
+  if (key) return key;
+
+  // 2. Try standard Process environment variables (Webpack/Node/Netlify default)
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      if (process.env.API_KEY) key = process.env.API_KEY;
+      if (process.env.GEMINI_API_KEY) key = process.env.GEMINI_API_KEY;
+      if (process.env.REACT_APP_API_KEY) key = process.env.REACT_APP_API_KEY;
+      if (process.env.REACT_APP_GEMINI_API_KEY) key = process.env.REACT_APP_GEMINI_API_KEY;
+    }
+  } catch (e) {}
+
+  return key;
+};
+
 // --- Components ---
 
 const DailyPlanTable = ({ plan, weeklyInfo }: { plan: DailyPlan; weeklyInfo: WeeklyInfo }) => {
@@ -490,12 +522,12 @@ const App = () => {
     setUploadError(null);
 
     try {
-      // Safety Check for API KEY
-      if (typeof process !== 'undefined' && process.env && !process.env.API_KEY) {
-         throw new Error("API Key is missing in configuration. Please check your environment settings.");
+      const apiKey = getApiKey();
+      if (!apiKey) {
+         throw new Error("API Key is missing. Please check your environment settings (API_KEY or GEMINI_API_KEY).");
       }
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: apiKey });
 
       let prompt = "";
       
@@ -581,7 +613,7 @@ const App = () => {
       
       if (error.message) {
         if (error.message.includes("API Key")) {
-            errorMessage = "配置错误：未找到 API Key，请检查部署设置。";
+            errorMessage = "配置错误：未找到 API Key，请检查部署设置 (需配置 API_KEY 或 GEMINI_API_KEY)。";
         } else if (error.message.includes("400")) {
             errorMessage = "请求错误 (400)：请检查文件格式或大小是否符合要求。";
         } else if (error.message.includes("413")) {
