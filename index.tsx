@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Clipboard, FileText, Calendar, Printer, Upload, Loader2, RefreshCw, Image as ImageIcon, MessageSquare, Send, FileType, Settings } from 'lucide-react';
+import { Clipboard, FileText, Calendar, Printer, Upload, Loader2, RefreshCw, Image as ImageIcon, MessageSquare, Send, FileType, Settings, AlertCircle } from 'lucide-react';
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 
 // --- Types ---
@@ -349,6 +349,12 @@ const App = () => {
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
+      // Size check: 10MB Limit
+      if (file.size > 10 * 1024 * 1024) {
+        setUploadError(`文件过大 (${(file.size / 1024 / 1024).toFixed(2)}MB)。请上传小于 10MB 的图片或PDF。`);
+        return;
+      }
+
       const isImage = file.type.startsWith('image/');
       const isPdf = file.type === 'application/pdf';
 
@@ -484,6 +490,11 @@ const App = () => {
     setUploadError(null);
 
     try {
+      // Safety Check for API KEY
+      if (typeof process !== 'undefined' && process.env && !process.env.API_KEY) {
+         throw new Error("API Key is missing in configuration. Please check your environment settings.");
+      }
+
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
       let prompt = "";
@@ -561,12 +572,28 @@ const App = () => {
             alert("计划已根据您的意见修改完毕！");
         }
       } else {
-        setUploadError('生成失败，请重试');
+        throw new Error("No content generated. The AI response was empty.");
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error generating plans:", error);
-      setUploadError('生成出错，请检查文件或网络后重试');
+      let errorMessage = "生成出错，请重试";
+      
+      if (error.message) {
+        if (error.message.includes("API Key")) {
+            errorMessage = "配置错误：未找到 API Key，请检查部署设置。";
+        } else if (error.message.includes("400")) {
+            errorMessage = "请求错误 (400)：请检查文件格式或大小是否符合要求。";
+        } else if (error.message.includes("413")) {
+            errorMessage = "文件过大 (413)：请上传更小的文件。";
+        } else if (error.message.includes("403")) {
+            errorMessage = "权限错误 (403)：API Key 无效或余额不足。";
+        } else {
+            errorMessage = `生成错误: ${error.message}`;
+        }
+      }
+      
+      setUploadError(errorMessage);
     } finally {
       setIsGenerating(false);
       setIsRefining(false);
@@ -736,7 +763,12 @@ const App = () => {
                      )}
                 </div>
                 
-                {uploadError && <p className="text-red-500 text-sm text-center bg-red-50 p-2 rounded border border-red-100">{uploadError}</p>}
+                {uploadError && (
+                  <div className="flex items-start gap-2 p-3 text-red-600 bg-red-50 border border-red-100 rounded-lg text-sm">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    <p>{uploadError}</p>
+                  </div>
+                )}
             </div>
         </div>
 
