@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Clipboard, FileText, Calendar, Printer, Upload, Loader2, RefreshCw, Image as ImageIcon, MessageSquare, Send, FileType, Settings, AlertCircle } from 'lucide-react';
+import { Clipboard, FileText, Calendar, Printer, Upload, Loader2, RefreshCw, Image as ImageIcon, MessageSquare, Send, FileType, Settings, AlertCircle, Cpu, HelpCircle } from 'lucide-react';
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 
 // --- Types ---
@@ -146,40 +146,6 @@ const INITIAL_DATA: WeeklyData = {
       }
     }
   ]
-};
-
-// --- Helpers ---
-
-// Robust API Key Retrieval
-const getApiKey = () => {
-  let key = "";
-  
-  // 1. Try Vite environment variables (Preferred for Netlify/Vite)
-  try {
-    // @ts-ignore
-    if (import.meta && import.meta.env) {
-      // @ts-ignore
-      if (import.meta.env.VITE_GEMINI_API_KEY) key = import.meta.env.VITE_GEMINI_API_KEY;
-      // @ts-ignore
-      if (import.meta.env.VITE_API_KEY) key = import.meta.env.VITE_API_KEY;
-      // @ts-ignore
-      if (import.meta.env.GEMINI_API_KEY) key = import.meta.env.GEMINI_API_KEY; // Less likely to work
-    }
-  } catch (e) {}
-
-  if (key) return key;
-
-  // 2. Try standard Process environment variables (Create React App / Webpack)
-  try {
-    if (typeof process !== 'undefined' && process.env) {
-      if (process.env.REACT_APP_GEMINI_API_KEY) key = process.env.REACT_APP_GEMINI_API_KEY;
-      if (process.env.REACT_APP_API_KEY) key = process.env.REACT_APP_API_KEY;
-      if (process.env.GEMINI_API_KEY) key = process.env.GEMINI_API_KEY;
-      if (process.env.API_KEY) key = process.env.API_KEY;
-    }
-  } catch (e) {}
-
-  return key;
 };
 
 // --- Components ---
@@ -362,6 +328,9 @@ const App = () => {
   const [modificationPrompt, setModificationPrompt] = useState("");
   const [showConfig, setShowConfig] = useState(true);
   
+  const [modelId, setModelId] = useState("gemini-2.5-flash");
+  const [isCustomModel, setIsCustomModel] = useState(false);
+  
   const tableRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modifyInputRef = useRef<HTMLTextAreaElement>(null);
@@ -518,16 +487,16 @@ const App = () => {
        return;
     }
 
+    if (!modelId) {
+        alert("请选择或输入有效的 AI 模型 ID");
+        return;
+    }
+
     isModification ? setIsRefining(true) : setIsGenerating(true);
     setUploadError(null);
 
     try {
-      const apiKey = getApiKey();
-      if (!apiKey) {
-         throw new Error("API Key is missing. Check settings.");
-      }
-
-      const ai = new GoogleGenAI({ apiKey: apiKey });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
       let prompt = "";
       
@@ -580,7 +549,7 @@ const App = () => {
       }
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: modelId, // Use the selected model ID
         contents: [
             { role: 'user', parts: [{ text: prompt }, { inlineData: { data: uploadedFile.data, mimeType: uploadedFile.mimeType } }] }
         ],
@@ -611,11 +580,21 @@ const App = () => {
       console.error("Error generating plans:", error);
       let errorMessage = "生成出错，请重试";
       
-      // Improved Error Messaging
-      if (error.message && error.message.includes("API Key")) {
-         errorMessage = `配置错误：未找到 API Key。如果您部署在 Netlify，请确保环境变量名为 'VITE_GEMINI_API_KEY' 或 'REACT_APP_GEMINI_API_KEY' (当前代码无法读取普通的 'GEMINI_API_KEY')。`;
-      } else if (error.message) {
-         errorMessage = error.message;
+      if (error.message) {
+         // Handle specific API key expiration error which is common in deployments
+         if (error.message.includes("API key expired")) {
+            errorMessage = "部署环境的 API Key 已过期或失效。\n\n这是 Google Cloud 自动生成的密钥常见问题。请按以下步骤修复：\n1. 进入 Google Cloud Console -> Cloud Run。\n2. 点击您的服务名称，选择「编辑和部署新的修订版本」。\n3. 切换到「变量」选项卡。\n4. 找到环境变量 `API_KEY`，将其值修改为您在 AI Studio 获取的有效 Key (如 ...l7Ss)。\n5. 点击部署即可恢复。";
+         } 
+         // Handle Quota Exceeded (429)
+         else if (error.message.includes("429") || error.message.includes("RESOURCE_EXHAUSTED") || error.message.includes("quota")) {
+             const currentModelName = isCustomModel ? "自定义模型" : (modelId.includes("flash") ? "Flash模型" : "Pro/Thinking模型");
+             errorMessage = `⚠️ 配额耗尽 (429 Error)\n\n原因：您当前使用的 ${currentModelName} 调用频率过高。\n\n解决方法：\n1. 如果使用的是 Pro 或 Thinking 模型，免费版限制仅为 2次/分钟。请等待 1-2 分钟后再试。\n2. 建议切换回 "Gemini 2.5 Flash" 模型，它的限制较宽（15次/分钟）。\n3. 检查您的 Google Cloud 结算账户是否正常。`;
+         }
+         else if (error.message.includes("API Key")) {
+            errorMessage = "API Key 配置错误，请检查环境变量设置。";
+         } else {
+            errorMessage = error.message;
+         }
       }
       
       setUploadError(errorMessage);
@@ -695,20 +674,74 @@ const App = () => {
                     >
                         <span className="flex items-center gap-2">
                             <Settings className="w-4 h-4" />
-                            步骤 2: 设置生成规则 (初始要求)
+                            步骤 2: 设置生成规则与模型
                         </span>
                         <span className="text-xs text-gray-500">{showConfig ? '收起' : '展开编辑'}</span>
                     </button>
                     
                     {showConfig && (
-                        <div className="p-4">
-                            <p className="text-xs text-gray-500 mb-2">您可以编辑下方的默认要求，AI将严格按照这些规则生成计划：</p>
-                            <textarea
-                                value={initialRequirements}
-                                onChange={(e) => setInitialRequirements(e.target.value)}
-                                className="w-full h-48 p-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none font-mono bg-gray-50"
-                                placeholder="在此输入生成规则..."
-                            />
+                        <div className="p-4 space-y-4">
+                            {/* Model Selection */}
+                            <div className="bg-orange-50 p-3 rounded-lg border border-orange-100">
+                                <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                                    <Cpu className="w-4 h-4 text-orange-600" />
+                                    选择 AI 模型 (Model)
+                                </label>
+                                <select
+                                    value={isCustomModel ? "custom" : modelId}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val === "custom") {
+                                            setIsCustomModel(true);
+                                            setModelId("");
+                                        } else {
+                                            setIsCustomModel(false);
+                                            setModelId(val);
+                                        }
+                                    }}
+                                    className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 bg-white cursor-pointer"
+                                >
+                                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (速度快，默认推荐)</option>
+                                    <option value="gemini-3-pro-preview">Gemini 3.0 Pro (逻辑强，反思更深刻)</option>
+                                    <option value="gemini-2.0-flash-thinking-exp-01-21">Gemini 2.0 Flash Thinking (深度思考版)</option>
+                                    <option value="custom">自定义模型 ID (Custom)...</option>
+                                </select>
+                                
+                                {isCustomModel && (
+                                    <input 
+                                        type="text"
+                                        value={modelId}
+                                        onChange={(e) => setModelId(e.target.value)}
+                                        placeholder="请输入模型 ID，例如: gemini-1.5-pro"
+                                        className="w-full mt-2 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500"
+                                    />
+                                )}
+
+                                <div className="flex items-start gap-2 mt-3 text-xs text-gray-500 bg-white p-2 rounded border border-orange-100">
+                                    <HelpCircle className="w-4 h-4 text-orange-400 flex-shrink-0" />
+                                    <div>
+                                        <p className="mb-1">
+                                            <strong>Flash:</strong> 速度快，适合快速出初稿。<br/>
+                                            <strong>Pro / Thinking:</strong> 适合处理复杂的反思和逻辑，但速度较慢。
+                                        </p>
+                                        <p>
+                                            <span className="text-orange-600 font-bold">关于配额：</span> 如果您的 Google AI Studio 显示“配额层级：不可用”，通常代表您处于<strong>免费层级 (Free Tier)</strong>。这完全正常，您可以放心使用，只是会有一定的速率限制。
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Prompt Configuration */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">生成规则 (System Prompt)</label>
+                                <p className="text-xs text-gray-500 mb-2">您可以编辑下方的默认要求，AI将严格按照这些规则生成计划：</p>
+                                <textarea
+                                    value={initialRequirements}
+                                    onChange={(e) => setInitialRequirements(e.target.value)}
+                                    className="w-full h-48 p-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none font-mono bg-gray-50"
+                                    placeholder="在此输入生成规则..."
+                                />
+                            </div>
                         </div>
                     )}
                 </div>
@@ -719,9 +752,9 @@ const App = () => {
                      {(!weeklyData.dailyPlans.length || weeklyData === INITIAL_DATA) ? (
                         <button 
                             onClick={() => generatePlans(false)}
-                            disabled={isGenerating || !uploadedFile}
+                            disabled={isGenerating || !uploadedFile || !modelId}
                             className={`w-full flex items-center justify-center gap-2 px-6 py-4 rounded-lg font-bold shadow-lg transition-all text-lg
-                                ${isGenerating || !uploadedFile
+                                ${isGenerating || !uploadedFile || !modelId
                                     ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
                                     : 'bg-gradient-to-r from-orange-500 to-red-500 text-white hover:from-orange-600 hover:to-red-600 transform hover:scale-[1.02]'
                                 }`}
@@ -729,7 +762,7 @@ const App = () => {
                             {isGenerating ? (
                                 <>
                                     <Loader2 className="w-6 h-6 animate-spin" />
-                                    正在读取文件并生成计划...
+                                    正在读取文件并生成计划 ({isCustomModel ? 'Custom' : modelId.split('-')[1]})...
                                 </>
                             ) : (
                                 <>
@@ -791,7 +824,7 @@ const App = () => {
                 {uploadError && (
                   <div className="flex items-start gap-2 p-3 text-red-600 bg-red-50 border border-red-100 rounded-lg text-sm">
                     <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                    <p>{uploadError}</p>
+                    <p className="whitespace-pre-wrap">{uploadError}</p>
                   </div>
                 )}
             </div>
